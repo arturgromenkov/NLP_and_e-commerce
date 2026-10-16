@@ -3,62 +3,78 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List
 
-# Подтягиваем кастомный логгер, который написали коллеги
+# Подтягиваем логгер
 from logger import logger
 
-# Импортируем функцию-заглушку и модель запроса
-# Используем __init__, так как точка входа app.py запускается из этой же папки
+# Импортируем нашу логику из соседнего файла
 from __init__ import extract_fields, ExtractFieldsRequest
 
-# Инициализируем приложение FastAPI (Оно и будет нашим API)
-app = FastAPI(title="M.Video Attribute Extraction API")
+# Создаем приложение FastAPI и сразу переносим Swagger UI на главную страницу (/)
+app = FastAPI(
+    title="Студенческий парсер М.Видео",
+    description="Разбираем чеки гибридным методом: Словари, Регулярки и Фоллбэк.",
+    version="1.0.0",
+    docs_url="/"  # Убрали /docs, теперь открывается прямо на 127.0.0.1:8080/
+)
 
 
-# --- Pydantic модели для строгого ответа API ---
+# --- Схемы данных (Pydantic) ---
 
-class Attribute(BaseModel):
-    """Модель одного извлеченного атрибута (например: Бренд - Samsung)"""
-    attribute: str
-    value: str
-    confidence: float
+class AttributeModel(BaseModel):
+    """
+    Как выглядит один распарсенный атрибут.
+    """
+    attribute: str  # Имя (Например: Цвет)
+    value: str  # Значение (Например: Черный)
+    confidence: float  # Уверенность (Например: 0.95)
+    source: str  # Откуда взяли (dictionary, regex или llm)
 
 
-class ExtractionResponse(BaseModel):
-    """Главная модель ответа, которая возвращает статус и список атрибутов"""
+class FinalResponse(BaseModel):
+    """
+    Как выглядит весь ответ нашего сервера.
+    """
     status: str
-    attributes: List[Attribute]
+    input_text: str
+    attributes: List[AttributeModel]
 
 
-# --- Роуты (Эндпоинты) API ---
+# --- Эндпоинты ---
 
-@app.post("/extract", response_model=ExtractionResponse)
-async def process_extraction(request: ExtractFieldsRequest):
+@app.post("/extract", response_model=FinalResponse)
+async def process_request(request: ExtractFieldsRequest):
     """
-    Главный эндпоинт для извлечения атрибутов из строки.
-    Пока реальной логики нет, возвращаем красивый Mock JSON (заглушку),
-    чтобы команда фронтенда могла начать делать интерфейс.
+    Этот эндпоинт принимает JSON от фронтенда со строкой price_string.
     """
-    logger.info(f"Получен запрос на извлечение: {request.price_string}")
+    logger.info("Кто-то дернул ручку /extract")
 
-    # Имитируем вызов реальной функции извлечения (результат пока игнорируем)
-    _ = await extract_fields(request)
+    # Вызываем нашу большую функцию из __init__.py
+    results = await extract_fields(request)
 
-    # Тестовые данные для демонстрации на чекпоинте
-    fake_data = [
-        Attribute(attribute="Бренд", value="Samsung", confidence=0.98),
-        Attribute(attribute="Цвет", value="черный", confidence=0.81)
-    ]
+    # Формируем ответ, превращая словари в Pydantic модели
+    my_attributes = []
+    for item in results:
+        attr_obj = AttributeModel(
+            attribute=item["attribute"],
+            value=item["value"],
+            confidence=item["confidence"],
+            source=item["source"]
+        )
+        my_attributes.append(attr_obj)
 
-    # Возвращаем JSON в правильном формате
-    return ExtractionResponse(status="success", attributes=fake_data)
+    # Отдаем ответ пользователю
+    return FinalResponse(
+        status="success",
+        input_text=request.price_string,
+        attributes=my_attributes
+    )
 
 
-# --- Функция запуска ---
+# --- Запуск ---
 
 def start_api(host: str, port: int):
     """
-    Эта функция вызывается из файла app.py.
-    Она берет настройки из .env и поднимает сервер через uvicorn.
+    Функция запускает сервер Uvicorn. Вызывается из app.py
     """
-    logger.info(f"Запуск API сервера на {host}:{port}")
+    logger.info(f"Стартуем сервер на {host}:{port}")
     uvicorn.run(app, host=host, port=port)
